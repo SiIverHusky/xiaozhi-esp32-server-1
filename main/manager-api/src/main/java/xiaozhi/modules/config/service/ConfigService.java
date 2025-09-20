@@ -19,4 +19,12 @@ public interface ConfigService {
      * @return 模型配置信息
      */
     Map<String, Object> getAgentModels(String macAddress, Map<String, String> selectedModule);
+
+    /**
+     * 检查设备所有者账户是否因聊天限制而被禁用
+     * 
+     * @param macAddress MAC地址
+     * @return 账户状态信息
+     */
+    Map<String, Object> checkAccountStatus(String macAddress);
 }
