@@ -7,6 +7,7 @@ import org.apache.shiro.authz.annotation.RequiresPermissions;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -145,6 +146,48 @@ public class AdminController {
         } catch (Exception e) {
             log.error("Error getting user chat statistics", e);
             return new Result<List<UserChatStatsVO>>().error("Failed to get user chat statistics: " + e.getMessage());
+        }
+    }
+
+    @PostMapping("/check-re-enable-accounts/{newLimit}")
+    @Operation(summary = "manually check and re-enable accounts for new chat limit (DEBUG)")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<String> checkReEnableAccounts(@PathVariable Integer newLimit) {
+        log.info("=== ADMIN DEBUG === Manually checking and re-enabling accounts with new limit: {}", newLimit);
+        try {
+            sysUserService.checkAndReEnableAccountsForNewLimit(newLimit);
+            return new Result<String>().ok("Check completed for new limit: " + newLimit);
+        } catch (Exception e) {
+            log.error("=== ADMIN DEBUG === Error checking re-enable accounts", e);
+            return new Result<String>().error("Error: " + e.getMessage());
+        }
+    }
+
+    @PostMapping("/check-disable-accounts/{newLimit}")
+    @Operation(summary = "manually check and disable accounts for lower chat limit (DEBUG)")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<String> checkDisableAccounts(@PathVariable Integer newLimit) {
+        log.info("=== ADMIN DEBUG === Manually checking and disabling accounts with lower limit: {}", newLimit);
+        try {
+            sysUserService.checkAndDisableAccountsForLowerLimit(newLimit);
+            return new Result<String>().ok("Check completed for lower limit: " + newLimit);
+        } catch (Exception e) {
+            log.error("=== ADMIN DEBUG === Error checking disable accounts", e);
+            return new Result<String>().error("Error: " + e.getMessage());
+        }
+    }
+
+    @PostMapping("/sync-chat-counts")
+    @Operation(summary = "synchronize chat counts from reliable source to database (DEBUG)")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<String> syncChatCountsToDatabase() {
+        log.info("=== ADMIN DEBUG === Manually synchronizing chat counts to database");
+        try {
+            sysUserService.syncChatCountToDatabase();
+            return new Result<String>().ok("Chat count synchronization completed successfully");
+        } catch (Exception e) {
+            log.error("=== ADMIN DEBUG === Error synchronizing chat counts", e);
+            return new Result<String>().error("Error: " + e.getMessage());
         }
     }
 }
