@@ -34,6 +34,18 @@ public class SysUserEntity extends BaseEntity {
      */
     private Integer status;
     /**
+     * 自动禁用原因，用于区分手动禁用和自动禁用的账户
+     */
+    private String autoDisabledReason;
+    /**
+     * 当月聊天数量
+     */
+    private Integer chatCountMonth;
+    /**
+     * 上次重置月份 (YYYY-MM)
+     */
+    private String lastResetMonth;
+    /**
      * 更新者
      */
     @TableField(fill = FieldFill.INSERT_UPDATE)
