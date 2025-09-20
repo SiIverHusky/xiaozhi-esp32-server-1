@@ -2,6 +2,7 @@ package xiaozhi.modules.agent.service.biz.impl;
 
 import java.util.Base64;
 import java.util.Date;
+import java.util.List;
 import java.util.Objects;
 
 import org.springframework.stereotype.Service;
@@ -19,6 +20,10 @@ import xiaozhi.modules.agent.service.AgentChatAudioService;
 import xiaozhi.modules.agent.service.AgentChatHistoryService;
 import xiaozhi.modules.agent.service.AgentService;
 import xiaozhi.modules.agent.service.biz.AgentChatHistoryBizService;
+import xiaozhi.modules.device.service.DeviceService;
+import xiaozhi.modules.sys.entity.SysUserEntity;
+import xiaozhi.modules.sys.service.SysParamsService;
+import xiaozhi.modules.sys.service.SysUserService;
 
 /**
  * {@link AgentChatHistoryBizService} impl
@@ -35,6 +40,9 @@ public class AgentChatHistoryBizServiceImpl implements AgentChatHistoryBizServic
     private final AgentChatHistoryService agentChatHistoryService;
     private final AgentChatAudioService agentChatAudioService;
     private final RedisUtils redisUtils;
+    private final DeviceService deviceService;
+    private final SysUserService sysUserService;
+    private final SysParamsService sysParamsService;
 
     /**
      * 处理聊天记录上报，包括文件上传和相关信息记录
@@ -64,6 +72,11 @@ public class AgentChatHistoryBizServiceImpl implements AgentChatHistoryBizServic
         } else if (Objects.equals(chatHistoryConf, Constant.ChatHistoryConfEnum.RECORD_TEXT_AUDIO.getCode())) {
             String audioId = saveChatAudio(report);
             saveChatText(report, agentId, macAddress, audioId, reportTimeMillis);
+        }
+
+        // Check chat limit for user chats (chatType=1) after saving the record
+        if (Objects.equals(chatType, (byte) 1)) {
+            checkAndEnforceChatLimit(macAddress);
         }
 
         // 更新设备最后对话时间
@@ -109,6 +122,146 @@ public class AgentChatHistoryBizServiceImpl implements AgentChatHistoryBizServic
         // 保存数据
         agentChatHistoryService.save(entity);
 
+        // 同步用户的当月聊天次数计数到数据库
+        syncUserChatCount(macAddress);
+
         log.info("Device {} mapping agent {} report successfully", macAddress, agentId);
+    }
+
+    /**
+     * 检查并强制执行聊天限制
+     * 如果用户当月聊天次数超过限制且不是超级管理员，则禁用账户
+     */
+    private void checkAndEnforceChatLimit(String macAddress) {
+        try {
+            log.info("=== CHAT LIMIT CHECK === Checking chat limit for device: {}", macAddress);
+            
+            // 获取设备关联的用户ID
+            xiaozhi.modules.device.entity.DeviceEntity device = deviceService.getDeviceByMacAddress(macAddress);
+            if (device == null || device.getUserId() == null) {
+                log.debug("=== CHAT LIMIT CHECK === No user found for device: {}", macAddress);
+                return;
+            }
+            
+            Long userId = device.getUserId();
+            
+            log.info("=== CHAT LIMIT CHECK === Device {} belongs to user: {}", macAddress, userId);
+            
+            // 获取用户信息
+            SysUserEntity user = sysUserService.selectById(userId);
+            if (user == null) {
+                log.warn("=== CHAT LIMIT CHECK === User not found: {}", userId);
+                return;
+            }
+            
+            // 检查是否是超级管理员，如果是则跳过限制
+            if (Objects.equals(user.getSuperAdmin(), 1)) {
+                log.info("=== CHAT LIMIT CHECK === User {} is superadmin, skipping chat limit", userId);
+                return;
+            }
+            
+            // 检查账户是否已经被禁用
+            if (Objects.equals(user.getStatus(), 0)) {
+                log.debug("=== CHAT LIMIT CHECK === User {} is already disabled", userId);
+                return;
+            }
+            
+            // 获取最大聊天次数限制
+            String maxChatCountStr = sysParamsService.getValue(Constant.MAX_CHAT_COUNT, true);
+            if (maxChatCountStr == null || maxChatCountStr.isEmpty()) {
+                log.debug("=== CHAT LIMIT CHECK === No max_chat_count configured, skipping limit check");
+                return;
+            }
+            
+            int maxChatCount;
+            try {
+                maxChatCount = Integer.parseInt(maxChatCountStr);
+            } catch (NumberFormatException e) {
+                log.error("=== CHAT LIMIT CHECK === Invalid max_chat_count value: {}", maxChatCountStr);
+                return;
+            }
+            
+            log.info("=== CHAT LIMIT CHECK === Max chat count limit: {}", maxChatCount);
+            
+            // 获取用户当月聊天次数（直接从数据库chat_count_month字段获取，性能更好）
+            Integer currentMonthCount = user.getChatCountMonth() != null ? user.getChatCountMonth() : 0;
+            
+            log.info("=== CHAT LIMIT CHECK === User {} current month chat count from database: {}", userId, currentMonthCount);
+            
+            // 检查是否超过限制
+            if (currentMonthCount > maxChatCount) {
+                log.warn("=== CHAT LIMIT CHECK === User {} exceeded chat limit ({} > {}), disabling account", 
+                        userId, currentMonthCount, maxChatCount);
+                
+                // 禁用账户并设置自动禁用原因
+                user.setStatus(0); // 0 = disabled
+                user.setAutoDisabledReason("MONTHLY_CHAT_LIMIT_EXCEEDED");
+                sysUserService.updateById(user);
+                
+                log.warn("=== CHAT LIMIT CHECK === User {} account disabled due to chat limit exceeded", userId);
+            } else {
+                log.debug("=== CHAT LIMIT CHECK === User {} within chat limit ({} <= {})", 
+                        userId, currentMonthCount, maxChatCount);
+            }
+            
+        } catch (Exception e) {
+            log.error("=== CHAT LIMIT CHECK === Error checking chat limit for device: {}", macAddress, e);
+            // Don't throw exception to avoid affecting normal chat reporting
+        }
+    }
+
+    /**
+     * 同步用户聊天次数计数
+     * 每次保存聊天记录时调用，从准确的数据源同步最新聊天次数到sys_user表
+     */
+    private void syncUserChatCount(String macAddress) {
+        try {
+            log.debug("=== CHAT COUNT SYNC === Syncing chat count for device: {}", macAddress);
+            
+            // 获取设备关联的用户ID
+            xiaozhi.modules.device.entity.DeviceEntity device = deviceService.getDeviceByMacAddress(macAddress);
+            if (device == null || device.getUserId() == null) {
+                log.debug("=== CHAT COUNT SYNC === No user found for device: {}", macAddress);
+                return;
+            }
+            
+            Long userId = device.getUserId();
+            String currentMonth = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM"));
+            
+            // 获取用户信息
+            xiaozhi.modules.sys.entity.SysUserEntity user = sysUserService.selectById(userId);
+            if (user == null) {
+                log.warn("=== CHAT COUNT SYNC === User {} not found", userId);
+                return;
+            }
+            
+            // 从可靠数据源获取实际聊天次数（与Manager Portal显示的一致）
+            List<xiaozhi.modules.sys.vo.UserChatStatsVO> userStats = sysUserService.getUserChatStats();
+            xiaozhi.modules.sys.vo.UserChatStatsVO currentUserStats = userStats.stream()
+                    .filter(stat -> stat.getUserId().equals(userId))
+                    .findFirst()
+                    .orElse(null);
+            
+            if (currentUserStats != null) {
+                Integer actualCurrentMonthCount = currentUserStats.getCurrentMonthCount();
+                Integer oldCount = user.getChatCountMonth();
+                
+                // 直接存储从CHAT_COUNT_FEATURE获取的准确数值
+                user.setChatCountMonth(actualCurrentMonthCount);
+                user.setLastResetMonth(currentMonth);
+                
+                // 更新数据库
+                sysUserService.updateById(user);
+                
+                log.debug("=== CHAT COUNT SYNC === Synced chat count for user {}: {} -> {} (from reliable source)", 
+                        userId, oldCount, actualCurrentMonthCount);
+            } else {
+                log.warn("=== CHAT COUNT SYNC === Could not find chat stats for user {}", userId);
+            }
+            
+        } catch (Exception e) {
+            log.error("=== CHAT COUNT SYNC === Error syncing chat count for device: {}", macAddress, e);
+            // Don't throw exception to avoid affecting normal chat reporting
+        }
     }
 }
