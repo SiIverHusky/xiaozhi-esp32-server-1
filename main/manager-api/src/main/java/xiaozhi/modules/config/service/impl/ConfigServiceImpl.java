@@ -24,7 +24,9 @@ import xiaozhi.modules.device.service.DeviceService;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.service.ModelConfigService;
 import xiaozhi.modules.sys.dto.SysParamsDTO;
+import xiaozhi.modules.sys.entity.SysUserEntity;
 import xiaozhi.modules.sys.service.SysParamsService;
+import xiaozhi.modules.sys.service.SysUserService;
 import xiaozhi.modules.timbre.service.TimbreService;
 import xiaozhi.modules.timbre.vo.TimbreDetailsVO;
 
@@ -39,6 +41,7 @@ public class ConfigServiceImpl implements ConfigService {
     private final RedisUtils redisUtils;
     private final TimbreService timbreService;
     private final AgentPluginMappingService agentPluginMappingService;
+    private final SysUserService sysUserService;
 
     @Override
     public Object getConfig(Boolean isCache) {
@@ -337,5 +340,50 @@ public class ConfigServiceImpl implements ConfigService {
         }
         result.put("prompt", prompt);
         result.put("summaryMemory", summaryMemory);
+    }
+
+    @Override
+    public Map<String, Object> checkAccountStatus(String macAddress) {
+        Map<String, Object> result = new HashMap<>();
+        
+        try {
+            // 根据MAC地址查找设备
+            DeviceEntity device = deviceService.getDeviceByMacAddress(macAddress);
+            if (device == null) {
+                result.put("accountDisabled", false);
+                result.put("reason", "Device not found or not bound");
+                return result;
+            }
+
+            // 根据设备获取用户信息
+            SysUserEntity user = sysUserService.selectById(device.getUserId());
+            if (user == null) {
+                result.put("accountDisabled", false);
+                result.put("reason", "User not found");
+                return result;
+            }
+
+            // 检查用户状态
+            boolean isDisabled = (user.getStatus() != null && user.getStatus() == 0);
+            result.put("accountDisabled", isDisabled);
+            
+            if (isDisabled) {
+                // 如果账户被禁用，提供禁用原因
+                String disabledReason = user.getAutoDisabledReason();
+                if (StringUtils.isNotBlank(disabledReason)) {
+                    result.put("reason", disabledReason);
+                } else {
+                    result.put("reason", "Account has been disabled");
+                }
+            } else {
+                result.put("reason", "Account is active");
+            }
+            
+        } catch (Exception e) {
+            result.put("accountDisabled", false);
+            result.put("reason", "Error checking account status: " + e.getMessage());
+        }
+        
+        return result;
     }
 }
