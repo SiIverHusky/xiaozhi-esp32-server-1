@@ -10,6 +10,7 @@ import java.util.regex.Pattern;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,6 +33,7 @@ import xiaozhi.modules.sys.dto.PasswordDTO;
 import xiaozhi.modules.sys.dto.SysUserDTO;
 import xiaozhi.modules.sys.entity.SysUserEntity;
 import xiaozhi.modules.sys.enums.SuperAdminEnum;
+import xiaozhi.modules.sys.event.MaxChatCountUpdatedEvent;
 import xiaozhi.modules.sys.service.SysParamsService;
 import xiaozhi.modules.sys.service.SysUserService;
 import xiaozhi.modules.sys.vo.AdminPageUserVO;
@@ -262,6 +264,183 @@ public class SysUserServiceImpl extends BaseServiceImpl<SysUserDao, SysUserEntit
         } catch (Exception e) {
             logger.error("Error getting user chat statistics", e);
             throw e;
+        }
+    }
+
+    @Override
+    public void checkAndReEnableAccountsForNewLimit(Integer newMaxChatCount) {
+        logger.info("=== CHAT LIMIT RE-ENABLE === Checking accounts for re-enablement with new limit: {}", newMaxChatCount);
+        
+        try {
+            // 找到所有因聊天限制而被自动禁用的账户
+            QueryWrapper<SysUserEntity> queryWrapper = new QueryWrapper<>();
+            queryWrapper.eq("status", 0) // 已禁用
+                    .eq("auto_disabled_reason", "MONTHLY_CHAT_LIMIT_EXCEEDED"); // 因聊天限制禁用
+            
+            List<SysUserEntity> disabledUsers = baseDao.selectList(queryWrapper);
+            logger.info("=== CHAT LIMIT RE-ENABLE === Found {} users disabled due to chat limit", disabledUsers.size());
+            
+            if (disabledUsers.isEmpty()) {
+                return;
+            }
+            
+            // 获取所有用户的当前聊天统计
+            List<UserChatStatsVO> allUserStats = getUserChatStats();
+            Map<Long, Integer> userCurrentChatCounts = new HashMap<>();
+            
+            for (UserChatStatsVO stat : allUserStats) {
+                userCurrentChatCounts.put(stat.getUserId(), stat.getCurrentMonthCount());
+            }
+            
+            // 检查每个被禁用的用户
+            int reEnabledCount = 0;
+            for (SysUserEntity user : disabledUsers) {
+                Integer currentChatCount = userCurrentChatCounts.getOrDefault(user.getId(), 0);
+                
+                if (currentChatCount <= newMaxChatCount) {
+                    // 当前聊天次数在新限制内，重新启用账户
+                    user.setStatus(1); // 1 = enabled
+                    user.setAutoDisabledReason(null); // 清除自动禁用原因
+                    baseDao.updateById(user);
+                    
+                    logger.info("=== CHAT LIMIT RE-ENABLE === Re-enabled user {} (current chats: {} <= new limit: {})", 
+                            user.getId(), currentChatCount, newMaxChatCount);
+                    reEnabledCount++;
+                } else {
+                    logger.debug("=== CHAT LIMIT RE-ENABLE === User {} still exceeds new limit (current chats: {} > new limit: {})", 
+                            user.getId(), currentChatCount, newMaxChatCount);
+                }
+            }
+            
+            logger.info("=== CHAT LIMIT RE-ENABLE === Re-enabled {} out of {} disabled users", reEnabledCount, disabledUsers.size());
+            
+        } catch (Exception e) {
+            logger.error("=== CHAT LIMIT RE-ENABLE === Error checking and re-enabling accounts for new limit", e);
+            throw e;
+        }
+    }
+
+    /**
+     * Check and disable accounts that exceed the new lower chat limit
+     */
+    @Override
+    @Transactional
+    public void checkAndDisableAccountsForLowerLimit(Integer newMaxChatCount) {
+        logger.info("=== CHAT LIMIT DISABLE === Checking accounts for disabling with lower limit: {}", newMaxChatCount);
+        
+        try {
+            // 找到所有当前启用的账户
+            QueryWrapper<SysUserEntity> queryWrapper = new QueryWrapper<>();
+            queryWrapper.eq("status", 1); // 1 = enabled
+            
+            List<SysUserEntity> enabledUsers = baseDao.selectList(queryWrapper);
+            logger.info("=== CHAT LIMIT DISABLE === Found {} enabled users to check", enabledUsers.size());
+            
+            if (enabledUsers.isEmpty()) {
+                return;
+            }
+            
+            // 获取所有用户的当前聊天统计
+            List<UserChatStatsVO> allUserStats = getUserChatStats();
+            Map<Long, Integer> userCurrentChatCounts = new HashMap<>();
+            
+            for (UserChatStatsVO stat : allUserStats) {
+                userCurrentChatCounts.put(stat.getUserId(), stat.getCurrentMonthCount());
+            }
+            
+            // 检查每个启用的用户
+            int disabledCount = 0;
+            for (SysUserEntity user : enabledUsers) {
+                Integer currentChatCount = userCurrentChatCounts.getOrDefault(user.getId(), 0);
+                
+                if (currentChatCount > newMaxChatCount) {
+                    // 当前聊天次数超过新限制，禁用账户
+                    user.setStatus(0); // 0 = disabled
+                    user.setAutoDisabledReason("MONTHLY_CHAT_LIMIT_EXCEEDED"); // 设置自动禁用原因
+                    baseDao.updateById(user);
+                    
+                    logger.info("=== CHAT LIMIT DISABLE === Disabled user {} (current chats: {} > new limit: {})", 
+                            user.getId(), currentChatCount, newMaxChatCount);
+                    disabledCount++;
+                } else {
+                    logger.debug("=== CHAT LIMIT DISABLE === User {} within new limit (current chats: {} <= new limit: {})", 
+                            user.getId(), currentChatCount, newMaxChatCount);
+                }
+            }
+            
+            logger.info("=== CHAT LIMIT DISABLE === Disabled {} out of {} enabled users due to lower limit", disabledCount, enabledUsers.size());
+            
+        } catch (Exception e) {
+            logger.error("=== CHAT LIMIT DISABLE === Error checking and disabling accounts for lower limit", e);
+            throw e;
+        }
+    }
+
+    @Override
+    @Transactional
+    public void syncChatCountToDatabase() {
+        logger.info("=== CHAT COUNT SYNC === Starting synchronization of chat counts to database");
+        
+        try {
+            // 获取所有用户的准确聊天统计数据（Manager Portal使用的数据源）
+            List<UserChatStatsVO> userChatStats = getUserChatStats();
+            logger.info("=== CHAT COUNT SYNC === Retrieved {} user chat statistics from reliable source", userChatStats.size());
+            
+            int updatedCount = 0;
+            String currentMonth = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM"));
+            
+            for (UserChatStatsVO stat : userChatStats) {
+                Long userId = stat.getUserId();
+                Integer actualCurrentMonthCount = stat.getCurrentMonthCount();
+                
+                // 更新sys_user表中的chat_count_month字段
+                SysUserEntity user = baseDao.selectById(userId);
+                if (user != null) {
+                    Integer oldChatCount = user.getChatCountMonth();
+                    
+                    // 更新聊天次数和重置月份
+                    user.setChatCountMonth(actualCurrentMonthCount);
+                    user.setLastResetMonth(currentMonth);
+                    
+                    baseDao.updateById(user);
+                    updatedCount++;
+                    
+                    logger.debug("=== CHAT COUNT SYNC === Updated user {}: {} -> {} chats", 
+                            userId, oldChatCount, actualCurrentMonthCount);
+                } else {
+                    logger.warn("=== CHAT COUNT SYNC === User {} not found in sys_user table", userId);
+                }
+            }
+            
+            logger.info("=== CHAT COUNT SYNC === Successfully synchronized {} user chat counts to database", updatedCount);
+            
+        } catch (Exception e) {
+            logger.error("=== CHAT COUNT SYNC === Error synchronizing chat counts to database", e);
+            throw e;
+        }
+    }
+    
+    /**
+     * Event listener for MAX_CHAT_COUNT parameter updates
+     */
+    @EventListener
+    @Transactional
+    public void handleMaxChatCountUpdated(MaxChatCountUpdatedEvent event) {
+        logger.info("=== CHAT LIMIT EVENT === Received MAX_CHAT_COUNT update event: {} -> {}", 
+                event.getOldValue(), event.getNewValue());
+        
+        if (event.getNewValue() != null && event.getOldValue() != null) {
+            if (event.getNewValue() > event.getOldValue()) {
+                logger.info("=== CHAT LIMIT EVENT === Chat limit increased, checking for accounts to re-enable");
+                checkAndReEnableAccountsForNewLimit(event.getNewValue());
+            } else if (event.getNewValue() < event.getOldValue()) {
+                logger.info("=== CHAT LIMIT EVENT === Chat limit decreased, checking for accounts to disable");
+                checkAndDisableAccountsForLowerLimit(event.getNewValue());
+            } else {
+                logger.debug("=== CHAT LIMIT EVENT === Chat limit unchanged, no action needed");
+            }
+        } else {
+            logger.debug("=== CHAT LIMIT EVENT === Missing old or new value, no action taken");
         }
     }
 }
