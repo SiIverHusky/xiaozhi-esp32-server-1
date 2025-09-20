@@ -7,6 +7,9 @@ import java.util.Map;
 import java.util.UUID;
 
 import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,6 +27,7 @@ import xiaozhi.common.utils.JsonUtils;
 import xiaozhi.modules.sys.dao.SysParamsDao;
 import xiaozhi.modules.sys.dto.SysParamsDTO;
 import xiaozhi.modules.sys.entity.SysParamsEntity;
+import xiaozhi.modules.sys.event.MaxChatCountUpdatedEvent;
 import xiaozhi.modules.sys.redis.SysParamsRedis;
 import xiaozhi.modules.sys.service.SysParamsService;
 
@@ -33,7 +37,10 @@ import xiaozhi.modules.sys.service.SysParamsService;
 @AllArgsConstructor
 @Service
 public class SysParamsServiceImpl extends BaseServiceImpl<SysParamsDao, SysParamsEntity> implements SysParamsService {
+    private static final Logger logger = LoggerFactory.getLogger(SysParamsServiceImpl.class);
+    
     private final SysParamsRedis sysParamsRedis;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     public PageData<SysParamsDTO> page(Map<String, Object> params) {
@@ -86,6 +93,12 @@ public class SysParamsServiceImpl extends BaseServiceImpl<SysParamsDao, SysParam
     public void update(SysParamsDTO dto) {
         validateParamValue(dto);
         detectingSMSParameters(dto.getParamCode(), dto.getParamValue());
+        
+        // 检查是否是max_chat_count参数更新
+        if (Constant.MAX_CHAT_COUNT.equals(dto.getParamCode())) {
+            handleMaxChatCountUpdate(dto.getParamValue());
+        }
+        
         SysParamsEntity entity = ConvertUtils.sourceToTarget(dto, SysParamsEntity.class);
         updateById(entity);
 
@@ -193,6 +206,11 @@ public class SysParamsServiceImpl extends BaseServiceImpl<SysParamsDao, SysParam
     @Override
     @Transactional(rollbackFor = Exception.class)
     public int updateValueByCode(String paramCode, String paramValue) {
+        // 检查是否是max_chat_count参数更新
+        if (Constant.MAX_CHAT_COUNT.equals(paramCode)) {
+            handleMaxChatCountUpdate(paramValue);
+        }
+        
         int count = baseDao.updateValueByCode(paramCode, paramValue);
         sysParamsRedis.set(paramCode, paramValue);
         return count;
@@ -243,5 +261,42 @@ public class SysParamsServiceImpl extends BaseServiceImpl<SysParamsDao, SysParam
             throw new RenException(promptStr.formatted(substring));
         }
         return true;
+    }
+
+    /**
+     * 处理max_chat_count参数更新
+     * 当参数值增加时，重新启用符合新限制的被禁用账户
+     */
+    private void handleMaxChatCountUpdate(String newParamValue) {
+        try {
+            if (StringUtils.isBlank(newParamValue)) {
+                return;
+            }
+            
+            logger.info("=== CHAT LIMIT UPDATE === Processing max_chat_count parameter update to: {}", newParamValue);
+            
+            // Get old value from Redis
+            String oldParamValue = sysParamsRedis.get(Constant.MAX_CHAT_COUNT);
+            Integer oldMaxChatCount = null;
+            Integer newMaxChatCount = null;
+            
+            try {
+                if (StringUtils.isNotBlank(oldParamValue)) {
+                    oldMaxChatCount = Integer.parseInt(oldParamValue);
+                }
+                newMaxChatCount = Integer.parseInt(newParamValue);
+            } catch (NumberFormatException e) {
+                logger.warn("=== CHAT LIMIT UPDATE === Invalid max_chat_count value - old: {}, new: {}", oldParamValue, newParamValue);
+                return;
+            }
+            
+            // Publish event for other services to handle
+            MaxChatCountUpdatedEvent event = new MaxChatCountUpdatedEvent(this, oldMaxChatCount, newMaxChatCount);
+            eventPublisher.publishEvent(event);
+            logger.info("=== CHAT LIMIT UPDATE === Published MAX_CHAT_COUNT update event: {} -> {}", oldMaxChatCount, newMaxChatCount);
+            
+        } catch (Exception e) {
+            logger.error("=== CHAT LIMIT UPDATE === Error processing max_chat_count update", e);
+        }
     }
 }
