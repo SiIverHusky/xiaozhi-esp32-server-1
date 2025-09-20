@@ -37,7 +37,7 @@ from core.auth import AuthMiddleware, AuthenticationError
 from config.config_loader import get_private_config_from_api
 from core.providers.tts.dto.dto import ContentType, TTSMessageDTO, SentenceType
 from config.logger import setup_logging, build_module_string, update_module_string
-from config.manage_api_client import DeviceNotFoundException, DeviceBindException
+from config.manage_api_client import DeviceNotFoundException, DeviceBindException, check_account_status
 
 
 TAG = __name__
@@ -148,6 +148,10 @@ class ConnectionHandler:
         self.timeout_seconds = (
             int(self.config.get("close_connection_no_voice_time", 120)) + 60
         )  # 在原来第一道关闭的基础上加60秒，进行二道关闭
+
+        # Account status tracking
+        self.account_disabled = False
+        self.account_disabled_reason = None
 
         # {"mcp":true} 表示启用MCP功能
         self.features = None
@@ -594,6 +598,83 @@ class ConnectionHandler:
             self.mcp_manager.initialize_servers(), self.loop
         )
 
+    def _check_account_status(self):
+        """Check if the device owner's account is disabled due to chat limits"""
+        if not self.read_config_from_api:
+            # If not using API config, don't check account status
+            return True
+            
+        try:
+            if self.device_id:
+                status_result = check_account_status(self.device_id)
+                if status_result:
+                    self.account_disabled = status_result.get("accountDisabled", False)
+                    self.account_disabled_reason = status_result.get("reason", "Unknown reason")
+                    
+                    if self.account_disabled:
+                        self.logger.bind(tag=TAG).warning(
+                            f"Account disabled for device {self.device_id}: {self.account_disabled_reason}"
+                        )
+                        return False
+                    else:
+                        self.logger.bind(tag=TAG).debug(
+                            f"Account active for device {self.device_id}: {self.account_disabled_reason}"
+                        )
+                        return True
+                else:
+                    self.logger.bind(tag=TAG).warning("Failed to get account status from API")
+                    # If API call fails, allow the interaction to continue (fail open)
+                    return True
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"Error checking account status: {e}")
+            # If there's an error, allow the interaction to continue (fail open)
+            return True
+        
+        return True
+
+    def _send_account_disabled_message(self):
+        """Send TTS message for disabled account"""
+        try:
+            disabled_message = "You've run out of tokens this month"
+            if self.account_disabled_reason and "月度聊天" in self.account_disabled_reason:
+                disabled_message = "您本月的聊天次数已用完"
+            
+            # Use TTS to send the message
+            if hasattr(self, 'tts') and self.tts:
+                uuid_str = str(uuid.uuid4()).replace("-", "")
+                sentence_id = uuid_str
+                
+                # Send TTS messages
+                self.tts.tts_text_queue.put(
+                    TTSMessageDTO(
+                        sentence_id=sentence_id,
+                        sentence_type=SentenceType.FIRST,
+                        content_type=ContentType.ACTION,
+                    )
+                )
+                self.tts.tts_text_queue.put(
+                    TTSMessageDTO(
+                        sentence_id=sentence_id,
+                        sentence_type=SentenceType.MIDDLE,
+                        content_type=ContentType.TEXT,
+                        content_detail=disabled_message,
+                    )
+                )
+                self.tts.tts_text_queue.put(
+                    TTSMessageDTO(
+                        sentence_id=sentence_id,
+                        sentence_type=SentenceType.LAST,
+                        content_type=ContentType.ACTION,
+                    )
+                )
+                
+                self.logger.bind(tag=TAG).info(f"Sent disabled account TTS: {disabled_message}")
+            else:
+                self.logger.bind(tag=TAG).warning("TTS not available for disabled account message")
+                
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"Error sending disabled account message: {e}")
+
     def change_system_prompt(self, prompt):
         self.prompt = prompt
         # 更新系统prompt至上下文
@@ -601,6 +682,16 @@ class ConnectionHandler:
 
     def chat(self, query, tool_call=False):
         self.logger.bind(tag=TAG).info(f"Large model receives user message: {query}")
+        
+        # Check account status before processing chat
+        if not self._check_account_status():
+            self.logger.bind(tag=TAG).warning(
+                f"Blocking chat for disabled account: {self.account_disabled_reason}"
+            )
+            self._send_account_disabled_message()
+            self.llm_finish_task = True  # Mark as finished to prevent further processing
+            return None
+        
         self.llm_finish_task = False
 
         if not tool_call:
