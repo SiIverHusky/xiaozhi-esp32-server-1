@@ -92,4 +92,26 @@ public interface SysUserService extends BaseService<SysUserEntity> {
      * @return 用户聊天统计列表
      */
     List<UserChatStatsVO> getUserChatStats();
+
+    /**
+     * 检查并重新启用因聊天限制而被禁用的账户
+     * 当max_chat_count参数增加时调用此方法
+     * 
+     * @param newMaxChatCount 新的最大聊天次数限制
+     */
+    void checkAndReEnableAccountsForNewLimit(Integer newMaxChatCount);
+
+    /**
+     * 检查并禁用超过新聊天限制的账户
+     * 当max_chat_count参数减少时调用此方法
+     * 
+     * @param newMaxChatCount 新的最大聊天次数限制
+     */
+    void checkAndDisableAccountsForLowerLimit(Integer newMaxChatCount);
+
+    /**
+     * 同步数据库中的chat_count_month字段与Manager Portal显示的准确数据
+     * 将从ai_agent_chat_history表计算的准确聊天次数同步到sys_user表
+     */
+    void syncChatCountToDatabase();
 }
