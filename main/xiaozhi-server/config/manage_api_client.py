@@ -189,5 +189,20 @@ def init_service(config):
     ManageApiClient(config)
 
 
+def check_account_status(mac_address: str) -> Optional[Dict]:
+    """Check if device owner's account is disabled due to chat limits"""
+    try:
+        return ManageApiClient._instance._execute_request(
+            "POST",
+            "/config/check-account-status",
+            json={
+                "macAddress": mac_address,
+            },
+        )
+    except Exception as e:
+        print(f"Failed to check account status for {mac_address}: {e}")
+        return None
+
+
 def manage_api_http_safe_close():
     ManageApiClient.safe_close()
