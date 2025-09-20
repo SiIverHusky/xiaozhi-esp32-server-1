@@ -99,15 +99,23 @@ export default {
     },
     // 获取智能体会话列表
     getAgentSessions(agentId, params, callback) {
+        const queryParams = new URLSearchParams({
+            page: params.page,
+            limit: params.limit
+        }).toString();
+        
+        console.log('API: getAgentSessions called with:', agentId, queryParams);
+        
         RequestService.sendRequest()
-            .url(`${getServiceUrl()}/agent/${agentId}/sessions`)
+            .url(`${getServiceUrl()}/agent/${agentId}/sessions?${queryParams}`)
             .method('GET')
-            .data(params)
             .success((res) => {
+                console.log('API: getAgentSessions response:', res);
                 RequestService.clearRequestTime();
                 callback(res);
             })
-            .networkFail(() => {
+            .networkFail((err) => {
+                console.error('API: getAgentSessions failed:', err);
                 RequestService.reAjaxFun(() => {
                     this.getAgentSessions(agentId, params, callback);
                 });
@@ -115,14 +123,18 @@ export default {
     },
     // 获取智能体聊天记录
     getAgentChatHistory(agentId, sessionId, callback) {
+        console.log('API: getAgentChatHistory called with:', agentId, sessionId);
+        
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/agent/${agentId}/chat-history/${sessionId}`)
             .method('GET')
             .success((res) => {
+                console.log('API: getAgentChatHistory response:', res);
                 RequestService.clearRequestTime();
                 callback(res);
             })
-            .networkFail(() => {
+            .networkFail((err) => {
+                console.error('API: getAgentChatHistory failed:', err);
                 RequestService.reAjaxFun(() => {
                     this.getAgentChatHistory(agentId, sessionId, callback);
                 });

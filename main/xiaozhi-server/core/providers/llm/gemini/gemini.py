@@ -83,6 +83,10 @@ class LLMProvider(LLMProviderBase):
     def _generate(self, session_id, dialogue, tools):
         chat = self.chats.get(session_id)
         
+        # Check if this is the first user message to prevent infinite function call loops
+        # If dialogue length is 2 (system + user), this is the first interaction
+        is_first_user_message = len(dialogue) == 2 and dialogue[0].get("role") == "system" and dialogue[1].get("role") == "user"
+        
         # If no chat session exists, create a new one
         if not chat:
             role_map = {"assistant": "model", "user": "user"}
@@ -131,6 +135,9 @@ class LLMProvider(LLMProviderBase):
             chat = model.start_chat(history=history)
             self.chats[session_id] = chat
 
+        # Block function calls on the first user message to prevent infinite loops
+        tools_to_use = None if is_first_user_message else tools
+        
         # The last message in the dialogue is the one to send
         latest_message = dialogue[-1] if dialogue else None
         
@@ -143,7 +150,7 @@ class LLMProvider(LLMProviderBase):
             stream = chat.send_message(
                 content=latest_message["content"],
                 generation_config=self.gen_cfg,
-                tools=tools,
+                tools=tools_to_use,
                 stream=True,
             )
             log.bind(tag=TAG).info("Successfully sent request to Vertex AI, streaming response.")

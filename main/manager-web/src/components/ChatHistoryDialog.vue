@@ -153,30 +153,43 @@ export default {
                 limit: this.limit
             };
 
+            console.log('Loading sessions for agent:', this.agentId, 'with params:', params);
+
             Api.agent.getAgentSessions(this.agentId, params, (res) => {
+                console.log('getAgentSessions response:', res);
                 if (res.data && res.data.data && Array.isArray(res.data.data.list)) {
                     const list = res.data.data.list;
+                    console.log('Sessions loaded:', list.length, 'items');
                     this.hasMore = list.length === this.limit;
 
                     this.sessions = [...this.sessions, ...list];
                     this.page++;
 
                     if (this.sessions.length > 0 && !this.currentSessionId) {
+                        console.log('Selecting first session:', this.sessions[0]);
                         this.selectSession(this.sessions[0]);
                     }
+                } else {
+                    console.error('Invalid response format:', res);
                 }
                 this.loading = false;
                 this.isFirstLoad = false;
             });
         },
         selectSession(session) {
+            console.log('Selecting session:', session);
             this.currentSessionId = session.sessionId;
             Api.agent.getAgentChatHistory(this.agentId, session.sessionId, (res) => {
+                console.log('getAgentChatHistory response:', res);
                 if (res.data && res.data.data) {
                     this.messages = res.data.data;
+                    console.log('Messages loaded:', this.messages.length, 'items');
                     if (this.messages.length > 0 && this.messages[0].macAddress) {
                         this.currentMacAddress = this.messages[0].macAddress;
                     }
+                } else {
+                    console.error('Invalid chat history response format:', res);
+                    this.messages = [];
                 }
             });
         },
