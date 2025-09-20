@@ -107,6 +107,11 @@ public interface Constant {
     String SERVER_FRONTED_URL = "server.fronted_url";
 
     /**
+     * 每月最大聊天次数限制
+     */
+    String MAX_CHAT_COUNT = "server.max_chat_count";
+
+    /**
      * 路径分割符
      */
     String FILE_EXTENSION_SEG = ".";
