@@ -1,5 +1,6 @@
 package xiaozhi.modules.config.controller;
 
+import java.util.Map;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -40,5 +41,17 @@ public class ConfigController {
         ValidatorUtils.validateEntity(dto);
         Object models = configService.getAgentModels(dto.getMacAddress(), dto.getSelectedModule());
         return new Result<Object>().ok(models);
+    }
+
+    @PostMapping("check-account-status")
+    @Operation(summary = "Check if device owner's account is disabled due to chat limits")
+    public Result<Object> checkAccountStatus(@RequestBody Map<String, String> request) {
+        String macAddress = request.get("macAddress");
+        if (macAddress == null || macAddress.isEmpty()) {
+            return new Result<Object>().error("MAC address is required");
+        }
+        
+        Object status = configService.checkAccountStatus(macAddress);
+        return new Result<Object>().ok(status);
     }
 }
