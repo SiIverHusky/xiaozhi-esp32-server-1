@@ -46,6 +46,18 @@ public class SysUserEntity extends BaseEntity {
      */
     private String lastResetMonth;
     /**
+     * 高级用户状态：0=普通用户，1=高级用户
+     */
+    private Integer isPremium;
+    /**
+     * 高级用户到期时间，NULL表示非高级用户
+     */
+    private Date premiumExpiresAt;
+    /**
+     * 上次高级状态检查时间
+     */
+    private Date premiumLastCheck;
+    /**
      * 更新者
      */
     @TableField(fill = FieldFill.INSERT_UPDATE)
