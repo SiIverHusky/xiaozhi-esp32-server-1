@@ -24,6 +24,7 @@ import xiaozhi.modules.device.service.DeviceService;
 import xiaozhi.modules.sys.entity.SysUserEntity;
 import xiaozhi.modules.sys.service.SysParamsService;
 import xiaozhi.modules.sys.service.SysUserService;
+import xiaozhi.modules.sys.service.UserPremiumSubscriptionService;
 
 /**
  * {@link AgentChatHistoryBizService} impl
@@ -43,6 +44,7 @@ public class AgentChatHistoryBizServiceImpl implements AgentChatHistoryBizServic
     private final DeviceService deviceService;
     private final SysUserService sysUserService;
     private final SysParamsService sysParamsService;
+    private final UserPremiumSubscriptionService premiumSubscriptionService;
 
     /**
      * 处理聊天记录上报，包括文件上传和相关信息记录
@@ -157,6 +159,18 @@ public class AgentChatHistoryBizServiceImpl implements AgentChatHistoryBizServic
             // 检查是否是超级管理员，如果是则跳过限制
             if (Objects.equals(user.getSuperAdmin(), 1)) {
                 log.info("=== CHAT LIMIT CHECK === User {} is superadmin, skipping chat limit", userId);
+                return;
+            }
+            
+            // 检查是否是高级用户，如果是则跳过聊天限制
+            if (premiumSubscriptionService.isUserPremium(userId)) {
+                log.info("=== CHAT LIMIT CHECK === User {} is premium, skipping chat limit", userId);
+                return;
+            }
+            
+            // 检查是否是高级用户，如果是则跳过聊天限制
+            if (premiumSubscriptionService.isUserPremium(userId)) {
+                log.info("=== CHAT LIMIT CHECK === User {} is premium, skipping chat limit", userId);
                 return;
             }
             
