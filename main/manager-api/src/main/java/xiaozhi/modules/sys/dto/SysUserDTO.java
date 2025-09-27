@@ -84,4 +84,15 @@ public class SysUserDTO implements Serializable {
     @Schema(description = "department name")
     private String deptName;
 
+    @Schema(description = "Premium status: 0=regular, 1=premium")
+    private Integer isPremium;
+
+    @Schema(description = "Premium expiry date")
+    @JsonFormat(pattern = DateUtils.DATE_TIME_PATTERN)
+    private Date premiumExpiresAt;
+
+    @Schema(description = "Premium last check date")
+    @JsonFormat(pattern = DateUtils.DATE_TIME_PATTERN)
+    private Date premiumLastCheck;
+
 }
