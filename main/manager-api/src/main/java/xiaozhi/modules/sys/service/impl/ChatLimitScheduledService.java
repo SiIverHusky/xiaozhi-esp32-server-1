@@ -14,6 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import xiaozhi.modules.sys.dao.SysUserDao;
 import xiaozhi.modules.sys.entity.SysUserEntity;
 import xiaozhi.modules.sys.service.SysUserService;
+import xiaozhi.modules.sys.service.UserPremiumSubscriptionService;
 
 /**
  * 聊天限制相关的定时任务服务
@@ -25,6 +26,7 @@ public class ChatLimitScheduledService {
 
     private final SysUserService sysUserService;
     private final SysUserDao sysUserDao;
+    private final UserPremiumSubscriptionService premiumSubscriptionService;
 
     /**
      * 每月第一天凌晨2点重新启用因聊天次数限制被禁用的账户
@@ -73,6 +75,24 @@ public class ChatLimitScheduledService {
             
         } catch (Exception e) {
             log.error("=== CHAT LIMIT RESET === Error during monthly account re-enabling", e);
+        }
+    }
+    
+    /**
+     * 每天凌晨3点检查到期的高级订阅并更新用户状态
+     * 确保高级状态及时更新，避免过期用户仍享受无限制聊天
+     */
+    @Scheduled(cron = "0 0 3 * * ?")
+    @Transactional
+    public void checkExpiringPremiumSubscriptions() {
+        log.info("=== PREMIUM CHECK === Starting daily premium subscription status check");
+        
+        try {
+            // 检查即将到期的订阅并更新状态
+            premiumSubscriptionService.checkExpiringSubscriptions();
+            log.info("=== PREMIUM CHECK === Completed daily premium subscription check");
+        } catch (Exception e) {
+            log.error("=== PREMIUM CHECK === Error during premium subscription check", e);
         }
     }
 }
