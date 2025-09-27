@@ -39,6 +39,7 @@ import xiaozhi.modules.sys.service.SysUserService;
 import xiaozhi.modules.sys.vo.AdminPageUserVO;
 import xiaozhi.modules.sys.vo.ChatCountVO;
 import xiaozhi.modules.sys.vo.UserChatStatsVO;
+import xiaozhi.modules.sys.dao.UserPremiumSubscriptionDao;
 
 /**
  * 系统用户
@@ -49,6 +50,7 @@ public class SysUserServiceImpl extends BaseServiceImpl<SysUserDao, SysUserEntit
     private static final Logger logger = LoggerFactory.getLogger(SysUserServiceImpl.class);
     
     private final SysUserDao sysUserDao;
+    private final UserPremiumSubscriptionDao premiumSubscriptionDao;
 
     private final DeviceService deviceService;
 
@@ -182,6 +184,9 @@ public class SysUserServiceImpl extends BaseServiceImpl<SysUserDao, SysUserEntit
             adminPageUserVO.setDeviceCount(deviceCount);
             adminPageUserVO.setStatus(user.getStatus());
             adminPageUserVO.setCreateDate(user.getCreateDate());
+            // Check premium status using DAO directly to avoid circular dependency
+            boolean isPremium = premiumSubscriptionDao.getActiveSubscriptionByUserId(user.getId()) != null;
+            adminPageUserVO.setIsPremium(isPremium);
             return adminPageUserVO;
         }).toList();
         return new PageData<>(list, page.getTotal());
