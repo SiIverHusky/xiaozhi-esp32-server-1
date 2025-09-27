@@ -28,4 +28,7 @@ public class AdminPageUserVO {
 
     @Schema(description = "Registered date")
     private Date createDate;
+
+    @Schema(description = "Premium Status")
+    private Boolean isPremium;
 }
