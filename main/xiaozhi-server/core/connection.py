@@ -610,15 +610,21 @@ class ConnectionHandler:
                 if status_result:
                     self.account_disabled = status_result.get("accountDisabled", False)
                     self.account_disabled_reason = status_result.get("reason", "Unknown reason")
+                    is_premium = status_result.get("isPremium", False)
                     
                     if self.account_disabled:
                         self.logger.bind(tag=TAG).warning(
                             f"Account disabled for device {self.device_id}: {self.account_disabled_reason}"
                         )
                         return False
+                    elif is_premium:
+                        self.logger.bind(tag=TAG).debug(
+                            f"Premium account for device {self.device_id}: {self.account_disabled_reason}"
+                        )
+                        return True
                     else:
                         self.logger.bind(tag=TAG).debug(
-                            f"Account active for device {self.device_id}: {self.account_disabled_reason}"
+                            f"Regular account active for device {self.device_id}: {self.account_disabled_reason}"
                         )
                         return True
                 else:
