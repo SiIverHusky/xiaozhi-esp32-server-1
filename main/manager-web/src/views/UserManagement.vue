@@ -50,6 +50,12 @@
                   <el-tag v-else type="danger">Disabled</el-tag>
                 </template>
               </el-table-column>
+              <el-table-column label="Premium" prop="isPremium" align="center" width="100">
+                <template slot-scope="scope">
+                  <el-tag v-if="scope.row.isPremium" type="warning" size="small">Premium</el-tag>
+                  <el-tag v-else type="info" size="small">Regular</el-tag>
+                </template>
+              </el-table-column>
               <el-table-column label="Operation" align="center">
                 <template slot-scope="scope">
                   <el-button size="mini" type="text" @click="resetPassword(scope.row)">Reset Password</el-button>
@@ -190,7 +196,8 @@ export default {
               ...item,
               selected: false,
               last3MonthsCount: 0,
-              currentMonthCount: 0
+              currentMonthCount: 0,
+              isPremium: item.isPremium || false
             }));
             this.total = data.data.total;
             // Merge chat stats with user data
