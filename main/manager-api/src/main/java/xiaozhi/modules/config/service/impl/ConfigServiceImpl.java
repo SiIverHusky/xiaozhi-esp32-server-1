@@ -27,6 +27,7 @@ import xiaozhi.modules.sys.dto.SysParamsDTO;
 import xiaozhi.modules.sys.entity.SysUserEntity;
 import xiaozhi.modules.sys.service.SysParamsService;
 import xiaozhi.modules.sys.service.SysUserService;
+import xiaozhi.modules.sys.service.UserPremiumSubscriptionService;
 import xiaozhi.modules.timbre.service.TimbreService;
 import xiaozhi.modules.timbre.vo.TimbreDetailsVO;
 
@@ -42,6 +43,7 @@ public class ConfigServiceImpl implements ConfigService {
     private final TimbreService timbreService;
     private final AgentPluginMappingService agentPluginMappingService;
     private final SysUserService sysUserService;
+    private final UserPremiumSubscriptionService premiumSubscriptionService;
 
     @Override
     public Object getConfig(Boolean isCache) {
@@ -365,7 +367,12 @@ public class ConfigServiceImpl implements ConfigService {
 
             // 检查用户状态
             boolean isDisabled = (user.getStatus() != null && user.getStatus() == 0);
+            
+            // 检查是否是高级用户
+            boolean isPremium = premiumSubscriptionService.isUserPremium(user.getId());
+            
             result.put("accountDisabled", isDisabled);
+            result.put("isPremium", isPremium);
             
             if (isDisabled) {
                 // 如果账户被禁用，提供禁用原因
@@ -375,8 +382,10 @@ public class ConfigServiceImpl implements ConfigService {
                 } else {
                     result.put("reason", "Account has been disabled");
                 }
+            } else if (isPremium) {
+                result.put("reason", "Premium account - unlimited chat");
             } else {
-                result.put("reason", "Account is active");
+                result.put("reason", "Account is active with chat limits");
             }
             
         } catch (Exception e) {
